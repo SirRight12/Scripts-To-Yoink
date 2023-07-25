@@ -1,2 +1,2 @@
-﻿# Scripts-To-Yoink
-# Take Whatever you want IDC I make these for fun
+﻿# Yoink these scripts plese I make these for fun
+# Feedback greatly appreciated
