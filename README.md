@@ -1,2 +1,2 @@
-﻿# Yoink these scripts plese I make these for fun
+﻿# Yoink these scripts please I make these for fun
 # Feedback greatly appreciated!
