@@ -1,22 +1,46 @@
-// Select the canvas element, if it exists in the HTML. Otherwise, create a new one and append it to the body.
-let canvas = document.querySelector("canvas");
-if (canvas == null) {
-    canvas = document.createElement("canvas");
-    document.body.appendChild(canvas);
-}
-
-// Set the width and height of the canvas.
-canvas.width = 1024;
-canvas.height = 576;
-
-// Get the 2D rendering context of the canvas.
-let c = canvas.getContext("2d");
-
-// Fill the canvas with a default color to start with.
-c.fillRect(0, 0, canvas.width, canvas.height);
-
-// SSGE (Simple Sprite Game Engine) namespace definition
 const SSGE = {
+    //class to render scenes to make swapping easier
+    SceneRender: class SceneRender {
+        constructor (scene,width,height,provideCanvas = false) {
+            this.canvas = provideCanvas;
+            if (!provideCanvas) {
+                this.canvas = document.createElement("canvas");
+                document.body.appendChild(this.canvas)
+            }
+            this.canvas.width = width;
+            this.canvas.height = height;
+            this.scene = scene
+            this.canvas.addEventListener("mousemove", (event) => {
+                this.mouseX = event.offsetX
+                this.mouseY = event.offsetY
+            })
+            this.scene.drawBackground(this.canvas)
+        }
+        swapScene(newScene) {
+            this.scene = newScene
+            //redraw the scene without updating stuff
+            this.scene.render(this.canvas,false)
+        }
+        render() {
+            this.scene.render(this.canvas)
+        }
+        updateDimensions(width,height) {
+            this.canvas.width = width;
+            this.canvas.height = height;
+        }
+        mouseIntersects(transform) {
+            transform.getNormalsFromRelatives({
+                x: this.canvas.width,
+                y: this.canvas.height,
+            })
+            let condition =
+            transform.position.x + transform.width >= scene.mouseX &&
+            transform.position.x <= scene.mouseX &&
+            transform.position.y + transform.height >= scene.mouseY &&
+            transform.position.y <= scene.mouseY;
+            return condition;
+        }
+    },
     // Define the 'Scene' class in the SSGE namespace
     Scene: class Scene {
         constructor({ gravity = 0.7, color = "lightblue" }) {
@@ -25,9 +49,7 @@ const SSGE = {
             this.color = color;
             this.children = {}; // To store the objects in the scene
             this.renderOrder = {}; // To maintain the rendering order of objects
-            this.render(); // Render the scene
         }
-
         // Method to add a child object to the scene
         add(child) {
             // If a child with the same ID already exists, remove it
@@ -38,7 +60,6 @@ const SSGE = {
 
             // Update the rendering order to ensure correct drawing
             for (let thing in this.children) {
-                let thisid = this.children[thing].id;
                 let childthing = this.children[thing].renderOrder;
                 if (!this.renderOrder[childthing]) {
                     this.renderOrder[childthing] = {};
@@ -64,80 +85,226 @@ const SSGE = {
             // Check if the render order is empty, and if so, delete it
             if (Object.keys(this.renderOrder[child.renderOrder]).length == 0) {
                 delete this.renderOrder[child.renderOrder];
-                console.log(this.renderOrder[child.renderOrder]);
             }
         }
 
         // Method to render the scene and its child objects
-        render() {
-            // Clear the canvas to start rendering from a clean slate
+        drawBackground(canvas) {
+            const c = canvas.getContext('2d')
             c.clearRect(0, 0, canvas.width, canvas.height);
             c.fillStyle = this.color;
             c.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        render(canvas,upd=true) {
+            const c = canvas.getContext('2d')
+            this.drawBackground(canvas)
 
             // Loop through the objects in the scene's rendering order and draw them
             for (let x in this.renderOrder) {
                 for (let y in this.renderOrder[x]) {
                     let child = this.children[this.renderOrder[x][y].id];
-                    child.draw();
-
-                    // Update the physics (if the object is a physics object)
+                    child.transform.getNormalsFromRelatives({
+                        x: canvas.width,
+                        y: canvas.height,
+                    })
+                    child.draw(c);
+                    if (!upd) continue
                     if (child.isPhysicsObject) {
                         // Check if the object is touching the ground (bottom of the canvas)
-                        if (child.position.y >= canvas.height - child.height) {
-                            child.position.y = canvas.height - child.height;
-                            child.velocity.y = 0;
+                        if (child.transform.position.y >= canvas.height - child.scale.y) {
+                            child.transform.position.y = canvas.height - child.scale.y;
+                            child.transform.velocity.y = 0;
                             child.isInAir = false;
                         } else {
                             // Apply gravity if the object is in the air
-                            child.velocity.y += this.gravity;
+                            child.transform.velocity.y += this.gravity;
                             child.isInAir = true;
                         }
 
                         // Horizontal movement handling
-                        child.velocity.x = 0;
+                        child.transform.velocity.x = 0;
                         if (child.keys.goingLeft) {
-                            child.velocity.x = 0 - Math.abs(child.walkSpeed);
-                            child.switchSprites("run");
+                            child.transform.velocity.x = 0 - Math.abs(child.walkSpeed);
+                            if (child.isImage) child.switchSprites("run");
                         } else if (child.keys.goingRight) {
-                            child.velocity.x = Math.abs(child.walkSpeed);
-                            child.switchSprites("run");
+                            child.transform.velocity.x = Math.abs(child.walkSpeed);
+                            if (child.isImage) child.switchSprites("run");
                         } else {
-                            child.switchSprites("idle");
+                            if (child.isImage) child.switchSprites("idle");
                         }
 
                         // Jump handling
                         if (child.keys.goingUp && !child.isInAir) {
-                            child.velocity.y += child.jumpPower;
+                            child.transform.velocity.y += child.jumpPower;
                             child.keys.goingUp = false;
                         }
 
                         // Update the object's position based on its velocity
-                        if (child.velocity.x != 0 || child.velocity.y != 0) {
-                            child.position.x += child.velocity.x;
-                            child.position.y += child.velocity.y;
+                        if (child.transform.velocity.x != 0 || child.transform.velocity.y != 0) {
+                            child.transform.position.x += child.transform.velocity.x;
+                            child.transform.position.y += child.transform.velocity.y;
 
                             // Check if the object is out of the canvas bounds and adjust its position
-                            if (child.position.x < 0) {
-                                child.position.x -= child.velocity.x;
-                            } else if (child.position.x > canvas.width - child.width) {
-                                child.position.x -= child.velocity.x;
+                            if (child.transform.position.x < 0) {
+                                child.transform.position.x -= child.transform.velocity.x;
+                            } else if (child.transform.position.x > canvas.width - child.transform.scale.x) {
+                                child.transform.position.x -= child.transform.velocity.x;
                             }
                         }
                     }
+                    // Update the physics (if the object is a physics object)
                 }
             }
         }
     },
-
+    // Define a transform class (To save space so you don't have to declare all things at once
+    transform: class transform {
+        
+        constructor ({position,scale,velocity}) {
+            if (!position.isVector2) {
+                throw new Error("Position must be type 'Vector2'")
+            }
+            if (!velocity.isVector2) {
+                throw new Error("Velocity must be type 'Vector2'")
+            }
+            if (!scale.isVector2) {
+                throw new Error("Velocity must be type 'Vector2'")
+            }
+            this.relatives = {
+                empty: true,   
+            }
+            if (position.isRelativeVector2) {
+                this.fillRelatives()
+                this.relatives['position'] = position
+            }
+            if (velocity.isRelativeVector2) {
+                this.fillRelatives()
+                this.relatives['velocity'] = velocity
+            }
+            if (scale.isRelativeVector2) {
+                this.fillRelatives()
+                this.relatives['scale'] = scale
+            }
+            this.position = position
+            this.scale = scale
+            this.velocity = velocity
+        }
+        fillRelatives() {
+            if (this.relatives.empty) delete this.relatives.empty
+        }
+        getNormalsFromRelatives(Dimensions) {
+            for (let x in this.relatives) {
+                const thing = this.relatives[x]
+                this[x] = thing.getGlobalVector(Dimensions)
+            }
+        }
+    },
+    //simple object class
+    Object: class Object {
+        constructor({
+            transform,
+            properties,
+            renderOrder = 1,
+            color = "red",
+            id,
+            isPhysicsObject = true,
+            }) {
+                this.transform = transform
+                this.isPhysicsObject = isPhysicsObject
+                this.id = id
+                this.color = color
+                this.renderOrder = renderOrder
+                this.properties = properties
+                this.keys = {
+                    goingUp: false,
+                    goingRight: false,
+                    goingLeft: false,
+                    actionKeyPressed: false,
+                };
+            }
+            draw(c) {
+                // Draw the sprite as a colored rectangle
+                c.fillStyle = this.color;
+                c.fillRect(this.transform.position.x, this.transform.position.y, this.transform.scale.x, this.transform.scale.y);
+            }
+            
+            // Method to check if the sprite is touching another object
+            isTouching(obj) {
+                if (obj.length > 0) {
+                    for (let x = 0; x < obj.length; x ++) {
+                        const obj1 = obj[x]
+                        let condition =
+                        this.transform.position.x + this.transform.scale.x >= obj1.transform.position.x &&
+                        this.transform.position.x <= obj1.transform.position.x + obj1.transform.scale.x &&
+                        this.transform.position.y + this.transform.scale.y >= obj.transform.position.y &&
+                        this.transform.position.y <= obj1.transform.position.y + obj1.transform.scale.y;
+                        if (condition) return obj1
+                    }
+                    return false
+                }
+                let condition =
+                    this.transform.position.x + this.transform.scale.x >= obj.transform.position.x &&
+                    this.transform.position.x <= obj.transform.position.x + obj.transform.scale.x &&
+                    this.transform.position.y + this.transform.scale.y >= obj.transform.position.y &&
+                    this.transform.position.y <= obj.transform.position.y + obj.transform.scale.y;
+                return condition;
+            }
+    },
+    Vector2: class Vector2 {
+        static UP = new this(0,1)
+        static RIGHT = new this(1,0)
+        static LEFT = new this(-1,0)
+        static RIGHT = new this(0,-1)
+        static ZERO = new this(0,0)
+        constructor (x=0,y=0) {
+            this.x = x
+            this.y = y
+            this.isVector2 = true
+        }
+        add(v2) {
+            this.x += v2.x
+            this.y += v2.y
+        }
+        multiply(v2) {
+            this.x *= v2.x
+            this.y *= v2.y
+        }
+        divide(v2) {
+            this.x = v2.x / this.x
+            this.y = v2.y / this.y
+        }
+        multiplyScalar(s) {
+            this.x *= s
+            this.y *= s
+        }
+        normalize() {
+            const length = (this.x ** 2) + (this.y ** 2)
+            this.x = this.x / length || 0
+            this.y = this.y / length || 0
+        }
+        subtract(v2) {
+            this.x -= v2.x
+            this.y -= v2.y
+        }
+        subtract2(v1,v2) {
+            this.x = v2.x - v1.x
+            this.y = v2.y - v1.y
+        }
+        add2(v1,v2) {
+            this.x = v1.x + v2.x
+            this.y = v1.y + v1.y
+        }
+        divide2(v1,v2) {
+            this.x = v2.x / v1.x
+            this.y = v2.y / v1.y
+        }
+    },
     // Define the 'Sprite' class in the SSGE namespace
+    //more complex than object as it supports images and spritesheets
     Sprite: class Sprite {
         constructor({
-            position = { x: 0, y: 0 },
-            velocity = { x: 0, y: 0 },
+            transform,
             isImage = false,
-            width = 0,
-            height = 0,
             properties,
             imgSrc,
             renderOrder = 1,
@@ -169,17 +336,14 @@ const SSGE = {
             };
             this.isPhysicsObject = isPhysicsObject;
             this.isInAir = true;
-            this.velocity = velocity;
             this.color = color;
             this.renderOrder = renderOrder;
-            this.position = position;
+            this.transform = transform;
             this.isImage = isImage;
             this.walkSpeed = walkSpeed;
             this.jumpPower = 0 - Math.abs(jumpPower);
             this.properties = properties;
             this.id = id;
-            this.width = width;
-            this.height = height;
             this.hasError = false;
             this.hasWarn = false;
 
@@ -209,7 +373,7 @@ const SSGE = {
         }
 
         // Method to draw the sprite on the canvas
-        draw() {
+        draw(c) {
             if (this.isImage) {
                 // Draw the sprite as an image
                 c.drawImage(
@@ -218,8 +382,8 @@ const SSGE = {
                     0,
                     this.image.width / this.framesMax,
                     this.image.height,
-                    this.position.x - this.offset.x,
-                    this.position.y - this.offset.y,
+                    this.transform.position.x - this.offset.x,
+                    this.transform.position.y - this.offset.y,
                     (this.image.width / this.framesMax) * this.scale,
                     this.image.height * this.scale
                 );
@@ -227,17 +391,17 @@ const SSGE = {
             } else {
                 // Draw the sprite as a colored rectangle
                 c.fillStyle = this.color;
-                c.fillRect(this.position.x, this.position.y, this.width, this.height);
+                c.fillRect(this.transform.position.x, this.transform.position.y, this.transform.scale.x, this.transform.scale.y);
             }
         }
 
         // Method to check if the sprite is touching another object
         isTouching(obj) {
             let condition =
-                this.position.x + this.width >= obj.position.x &&
-                this.position.x <= obj.position.x + obj.width &&
-                this.position.y + this.height >= obj.position.y &&
-                this.position.y <= obj.position.y + obj.height;
+                this.transform.position.x + this.transform.scale.x >= obj.transform.position.x &&
+                this.transform.position.x <= obj.transform.position.x + obj.transform.scale.x &&
+                this.transform.position.y + this.transform.scale.y >= obj.transform.position.y &&
+                this.transform.position.y <= obj.transform.position.y + obj.transform.scale.y;
             return condition;
         }
 
@@ -302,3 +466,18 @@ const SSGE = {
         }
     },
 };
+SSGE.transform.ZERO = new SSGE.transform({
+    position: new SSGE.Vector2(),
+    scale: new SSGE.Vector2(100,100),
+    velocity: new SSGE.Vector2()
+})
+SSGE['RelativeVector2'] = class Vector2R extends SSGE.Vector2 {
+    constructor (x,y) {
+        super(x,y)
+        this.isRelativeVector2 = true
+    }
+    getGlobalVector(Dimensions) {
+        const vec = new SSGE.Vector2(Dimensions.x * this.x, Dimensions.y * this.y)
+        return vec
+    }
+}
